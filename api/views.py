@@ -1,0 +1,138 @@
+from api.serializers import JobSerializer
+from api.models import job
+from api.serializers import RegisterSerializer
+from rest_framework.views import APIView
+from api.models import User
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from django.contrib.auth.models import User
+from django.contrib.auth import authenticate
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.permissions import IsAuthenticated
+from django.core.mail import send_mail
+from django.conf import settings
+# from rest_framework import status, permissions
+
+
+class RegisterView(APIView):
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({"msg": "User registered successfully"}, status=200)
+        return Response(serializer.errors, status=400)
+
+
+class LoginView(APIView):
+    def post(self, request):
+        email = request.data.get("email")
+        password = request.data.get("password")
+
+        try:
+            user_obj = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response({"error": "Invalid email or password"}, status=401)
+
+        user = authenticate(username=user_obj.username, password=password)
+        if user:
+            refresh = RefreshToken.for_user(user)
+            return Response({
+                "refresh": str(refresh),
+                "access": str(refresh.access_token),
+            })
+        return Response({"error": "Invalid email or password"}, status=401)
+
+class LogoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            refresh_token = request.data["refresh"]
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+
+            return Response({"message": "Logout successful"}, status=status.HTTP_205_RESET_CONTENT)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+# get all the jobs
+class JobList(APIView):
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        all_jobs =  job.objects.all()
+        serializer = JobSerializer(all_jobs, many = True)
+        return Response(serializer.data, status = 200)
+    
+
+class applyJobs(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            job_apply = job.objects.get(pk=pk)
+        except job.DoesNotExist:
+            return Response({'msg': 'No job found'}, status=404)
+
+        # check if job already applied
+        if job_apply.apply_by == request.user:
+            return Response({'msg': 'You have already applied to this job or you are not allowed to apply'}, status=400)
+
+        serializer = JobSerializer(job_apply, data={'apply_by': request.user.id}, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            
+            # Email to recruiter
+            if job_apply.posted_by and job_apply.posted_by.email:
+                send_mail(
+                    subject=f"New Application for {job_apply.title}",
+                    message=f"{request.user.username} has applied for your job: {job_apply.title}",
+                    from_email=settings.EMAIL_HOST_USER,
+                    recipient_list=[job_apply.posted_by.email],
+                    fail_silently=False,
+                )
+
+            # Email to candidate
+            if request.user.email:
+                send_mail(
+                    subject=f"Application Submitted: {job_apply.title}",
+                    message=f"Hi {request.user.username},\n\nYou have successfully applied for the job, having some config issue with gmail settings'{job_apply.title}'.",
+                    from_email=settings.EMAIL_HOST_USER,
+                    recipient_list=[request.user.email],
+                    fail_silently=False,
+                )
+            return Response({'msg': 'Job Applied', 'job': serializer.data}, status=200)
+
+        return Response(serializer.errors, status=400)
+    
+    # applied jobs by a user
+    def get(self, request):
+        jobs = job.objects.filter(apply_by = request.user)
+        if not jobs.exists:
+            return Response({'msg':'No applied jobs'}, status = 400)
+        serilizer = JobSerializer(jobs, many= True)
+        return Response(serilizer.data, status = 200)
+
+# for recuiter
+# creating the job
+class createJobPost(APIView):
+    permission_classes = [IsAuthenticated]
+    def post(self, request):
+        title = request.data.get('title')
+        description = request.data.get('description')
+        if not (title or description):
+            return Response({'error':'please provide details'}, status = 400)
+        
+        jobcreate = job.objects.create(title = title, description = description, posted_by= request.user)
+        return Response({'msg':'Job craeted successfully'},status = 200)
+
+    def get(self, request):
+        all_app = job.objects.filter(posted_by = request.user, apply_by__isnull=False)
+        if not all_app.exists():
+            return Response({'msg':'No canditate applied for this job'})
+        serializer = JobSerializer(all_app)
+        return Response(serializer.data, status = 200)
+    
+
+
+
