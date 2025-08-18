@@ -12,7 +12,6 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.permissions import IsAuthenticated
 from django.core.mail import send_mail
 from django.conf import settings
-# from rest_framework import status, permissions
 
 
 class RegisterView(APIView):
@@ -108,7 +107,7 @@ class applyJobs(APIView):
     # applied jobs by a user
     def get(self, request):
         jobs = job.objects.filter(apply_by = request.user)
-        if not jobs.exists:
+        if not jobs.exists():
             return Response({'msg':'No applied jobs'}, status = 400)
         serilizer = JobSerializer(jobs, many= True)
         return Response(serilizer.data, status = 200)
@@ -120,17 +119,18 @@ class createJobPost(APIView):
     def post(self, request):
         title = request.data.get('title')
         description = request.data.get('description')
-        if not (title or description):
+        if not (title and description):
             return Response({'error':'please provide details'}, status = 400)
         
         jobcreate = job.objects.create(title = title, description = description, posted_by= request.user)
         return Response({'msg':'Job craeted successfully'},status = 200)
 
+    # jobs posted  by the recuiter and apply by user is not null
     def get(self, request):
         all_app = job.objects.filter(posted_by = request.user, apply_by__isnull=False)
         if not all_app.exists():
             return Response({'msg':'No canditate applied for this job'})
-        serializer = JobSerializer(all_app)
+        serializer = JobSerializer(all_app, many = True)
         return Response(serializer.data, status = 200)
     
 
