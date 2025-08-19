@@ -127,7 +127,7 @@ class createJobPost(APIView):
 
     # jobs posted  by the recuiter and apply by user is not null
     def get(self, request):
-        all_app = job.objects.filter(posted_by = request.user, apply_by__isnull=False).distinct() 
+        all_app = job.objects.filter(posted_by = request.user).distinct() 
         if not all_app.exists():
             return Response({'msg':'No canditate applied for this job'})
         serializer = JobSerializer(all_app, many = True)
